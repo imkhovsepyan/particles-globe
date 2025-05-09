@@ -1,0 +1,507 @@
+<!-- Karen H | im@khovsepyan.com -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Animated Particle Sphere</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background-color: #000;
+        font-family: Arial, sans-serif;
+      }
+
+      canvas {
+        display: block;
+        position: absolute;
+        top: 0;
+        left: 0;
+      }
+
+      .info {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+        color: #fff;
+        font-size: 14px;
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 10px;
+        border-radius: 5px;
+        z-index: 100;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <div class="info">Move mouse to interact | Click to add energy</div>
+
+    <script>
+      // Initialize canvas
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+
+      // Set canvas size
+      function setCanvasSize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      setCanvasSize();
+      window.addEventListener("resize", setCanvasSize);
+
+      // Variables for particles and network
+      const particles = [];
+      const connections = [];
+      const particleCount = 800;
+      const radius = Math.min(window.innerWidth, window.innerHeight) * 0.35;
+      const center = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+
+      // Mouse interaction
+      let mouse = { x: 0, y: 0, radius: radius * 0.25 };
+      let targetRotationX = 0;
+      let targetRotationY = 0;
+      let currentRotationX = 0;
+      let currentRotationY = 0;
+      let autoRotate = true;
+
+      // Animation variables
+      let pulsePhase = 0;
+      let energyWaves = [];
+
+      // Track mouse position
+      document.addEventListener("mousemove", function (e) {
+        mouse.x = e.clientX;
+        mouse.y = e.clientY;
+
+        // Update rotation targets based on mouse position
+        targetRotationY = (e.clientX - window.innerWidth / 2) * 0.0008;
+        targetRotationX = (e.clientY - window.innerHeight / 2) * 0.0008;
+
+        // Disable auto-rotation when mouse is moving
+        autoRotate = false;
+        setTimeout(() => {
+          autoRotate = true;
+        }, 2000);
+      });
+
+      // Add energy wave on click
+      canvas.addEventListener("click", function (e) {
+        // Create a new energy wave from the click position
+        const clickX = e.clientX;
+        const clickY = e.clientY;
+
+        energyWaves.push({
+          x: clickX,
+          y: clickY,
+          radius: 0,
+          maxRadius: radius * 1.5,
+          speed: 5,
+          strength: 1,
+        });
+
+        // Highlight particles near the click
+        particles.forEach((particle) => {
+          const dx = particle.x - clickX;
+          const dy = particle.y - clickY;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          if (distance < radius * 0.3) {
+            particle.energy += (1 - distance / (radius * 0.3)) * 0.5;
+            particle.brightness = Math.min(1, particle.brightness + 0.4);
+            particle.highlighted = true;
+
+            // Add velocity away from click point
+            const angle = Math.atan2(dy, dx);
+            particle.vx = Math.cos(angle) * 0.5;
+            particle.vy = Math.sin(angle) * 0.5;
+            particle.vz = (Math.random() - 0.5) * 0.5;
+          }
+        });
+      });
+
+      // Particle class
+      class Particle {
+        constructor() {
+          // Random position on a sphere surface
+          this.theta = Math.random() * Math.PI * 2;
+          this.phi = Math.acos(2 * Math.random() - 1);
+
+          // Convert spherical coordinates to Cartesian
+          this.x3d = Math.sin(this.phi) * Math.cos(this.theta) * radius;
+          this.y3d = Math.sin(this.phi) * Math.sin(this.theta) * radius;
+          this.z3d = Math.cos(this.phi) * radius;
+
+          // Add small variation to the radius to make it less perfect
+          const radiusVariation = 0.95 + Math.random() * 0.1;
+          this.x3d *= radiusVariation;
+          this.y3d *= radiusVariation;
+          this.z3d *= radiusVariation;
+
+          // Original (home) position
+          this.homeX = this.x3d;
+          this.homeY = this.y3d;
+          this.homeZ = this.z3d;
+
+          // Velocities for movement
+          this.vx = (Math.random() - 0.5) * 0.2;
+          this.vy = (Math.random() - 0.5) * 0.2;
+          this.vz = (Math.random() - 0.5) * 0.2;
+
+          // Energy and movement factors
+          this.energy = 0;
+          this.friction = 0.95;
+          this.homeForce = 0.02;
+
+          // Projected 2D coordinates (will be updated)
+          this.x = 0;
+          this.y = 0;
+          this.z = 0;
+
+          // Particle properties
+          this.size = 2.5 + Math.random() * 1.5;
+          this.brightness = 0.3 + Math.random() * 0.3;
+          this.highlighted = false;
+          this.pulseOffset = Math.random() * Math.PI * 2;
+
+          // Connection properties
+          this.connections = [];
+        }
+
+        // Update particle position with rotation
+        update() {
+          // Apply energy and movement physics
+          if (this.energy > 0) {
+            // Apply velocity
+            this.x3d += this.vx;
+            this.y3d += this.vy;
+            this.z3d += this.vz;
+
+            // Apply friction
+            this.vx *= this.friction;
+            this.vy *= this.friction;
+            this.vz *= this.friction;
+
+            // Apply home force (pulls particles back to their original position)
+            const dx = this.homeX - this.x3d;
+            const dy = this.homeY - this.y3d;
+            const dz = this.homeZ - this.z3d;
+
+            this.vx += dx * this.homeForce;
+            this.vy += dy * this.homeForce;
+            this.vz += dz * this.homeForce;
+
+            // Reduce energy
+            this.energy *= 0.98;
+          }
+
+          // Apply wave effects from clicks
+          energyWaves.forEach((wave) => {
+            // Get 2D distance from wave center
+            const dx = this.x - wave.x;
+            const dy = this.y - wave.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // If particle is within the wave radius
+            if (distance > wave.radius - 20 && distance < wave.radius + 20) {
+              // Apply force based on wave strength
+              const angle = Math.atan2(dy, dx);
+              this.vx += Math.cos(angle) * 0.2 * wave.strength;
+              this.vy += Math.sin(angle) * 0.2 * wave.strength;
+              this.energy = Math.max(this.energy, 0.2);
+            }
+          });
+
+          // Apply rotations
+          const cosRotX = Math.cos(currentRotationX);
+          const sinRotX = Math.sin(currentRotationX);
+          const cosRotY = Math.cos(currentRotationY);
+          const sinRotY = Math.sin(currentRotationY);
+
+          // Rotate around Y axis
+          const rotatedX = this.x3d * cosRotY - this.z3d * sinRotY;
+          const rotatedZ = this.x3d * sinRotY + this.z3d * cosRotY;
+
+          // Rotate around X axis
+          const rotatedY = this.y3d * cosRotX + rotatedZ * sinRotX;
+          const finalZ = -this.y3d * sinRotX + rotatedZ * cosRotX;
+
+          // Perspective projection
+          const scale = 1200 / (1200 + finalZ);
+          this.x = center.x + rotatedX * scale;
+          this.y = center.y + rotatedY * scale;
+          this.z = finalZ;
+
+          // Mouse interaction
+          const dx = this.x - mouse.x;
+          const dy = this.y - mouse.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          if (distance < mouse.radius) {
+            this.highlighted = true;
+            this.brightness = 0.6;
+            this.energy = Math.max(this.energy, 0.1);
+
+            // Add slight repulsion
+            const angle = Math.atan2(dy, dx);
+            this.vx += Math.cos(angle) * 0.01;
+            this.vy += Math.sin(angle) * 0.01;
+          } else {
+            this.highlighted = false;
+
+            // Gradually reduce brightness down to minimum
+            if (this.brightness > 0.3) {
+              this.brightness *= 0.98;
+            }
+          }
+
+          // Apply pulse effect
+          this.size =
+            (2.5 + Math.random() * 1.5) *
+            (1 + 0.2 * Math.sin(pulsePhase + this.pulseOffset));
+        }
+
+        // Draw particle
+        draw() {
+          // Calculate visibility based on depth
+          const depthFactor = (this.z + radius) / (2 * radius);
+
+          // Skip particles that are too far back
+          if (depthFactor < 0.2) return;
+
+          // Calculate brightness based on energy and depth
+          let finalBrightness = this.brightness;
+          if (this.energy > 0) {
+            finalBrightness = Math.min(1, this.brightness + this.energy * 0.5);
+          }
+
+          // Draw solid center
+          ctx.beginPath();
+          ctx.fillStyle = `rgba(255, 255, 255, ${
+            finalBrightness * depthFactor
+          })`;
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Draw glow if highlighted or energized
+          if (this.highlighted || this.energy > 0.1) {
+            ctx.beginPath();
+            ctx.fillStyle = `rgba(255, 255, 255, ${finalBrightness * 0.2})`;
+            ctx.arc(this.x, this.y, this.size * 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+
+      // Connection class
+      class Connection {
+        constructor(p1, p2) {
+          this.p1 = p1;
+          this.p2 = p2;
+          this.distance = calculateDistance3D(p1, p2);
+          this.originalDistance = this.distance;
+          this.pulseOffset = Math.random() * Math.PI * 2;
+          this.energy = 0;
+        }
+
+        // Update connection
+        update() {
+          // Recalculate distance (it may change as particles move)
+          const dx = this.p1.x3d - this.p2.x3d;
+          const dy = this.p1.y3d - this.p2.y3d;
+          const dz = this.p1.z3d - this.p2.z3d;
+          this.distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+          // Update energy based on particles' energy
+          this.energy = Math.max(this.p1.energy, this.p2.energy);
+        }
+
+        // Draw connection line
+        draw() {
+          // Skip connections that are too far back
+          const depthFactor1 = (this.p1.z + radius) / (2 * radius);
+          const depthFactor2 = (this.p2.z + radius) / (2 * radius);
+
+          if (depthFactor1 < 0.2 || depthFactor2 < 0.2) return;
+
+          // Calculate opacity based on particles' brightness, depth and energy
+          let opacity =
+            Math.min(this.p1.brightness, this.p2.brightness) *
+            0.5 *
+            Math.min(depthFactor1, depthFactor2);
+
+          // Boost opacity if connection is energized
+          if (this.energy > 0) {
+            opacity = Math.min(1, opacity + this.energy * 0.3);
+          }
+
+          // Add pulse effect to connections
+          opacity *= 1 + 0.3 * Math.sin(pulsePhase + this.pulseOffset);
+
+          // Skip very faint connections
+          if (opacity < 0.03) return;
+
+          // Determine whether to use gradient for energized connections
+          if (this.energy > 0.1) {
+            // Create gradient for energized connections
+            const gradient = ctx.createLinearGradient(
+              this.p1.x,
+              this.p1.y,
+              this.p2.x,
+              this.p2.y
+            );
+
+            gradient.addColorStop(0, `rgba(255, 255, 255, ${opacity})`);
+            gradient.addColorStop(0.5, `rgba(210, 240, 255, ${opacity * 1.2})`);
+            gradient.addColorStop(1, `rgba(255, 255, 255, ${opacity})`);
+
+            ctx.strokeStyle = gradient;
+          } else {
+            // Use solid color for normal connections
+            ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
+          }
+
+          // Calculate line width based on energy
+          ctx.lineWidth = 1 + this.energy;
+
+          // Draw the connection
+          ctx.beginPath();
+          ctx.moveTo(this.p1.x, this.p1.y);
+          ctx.lineTo(this.p2.x, this.p2.y);
+          ctx.stroke();
+        }
+      }
+
+      // Calculate 3D distance between particles
+      function calculateDistance3D(p1, p2) {
+        const dx = p1.x3d - p2.x3d;
+        const dy = p1.y3d - p2.y3d;
+        const dz = p1.z3d - p2.z3d;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
+
+      // Create particles
+      function createParticles() {
+        for (let i = 0; i < particleCount; i++) {
+          particles.push(new Particle());
+        }
+      }
+
+      // Create connections between particles
+      function createConnections() {
+        const maxDistance = radius * 0.5;
+        const minDistance = radius * 0.2;
+        const maxConnectionsPerParticle = 5;
+
+        // Track number of connections per particle
+        const connectionCounts = new Array(particles.length).fill(0);
+
+        // Find potential connections based on distance
+        for (let i = 0; i < particles.length; i++) {
+          for (let j = i + 1; j < particles.length; j++) {
+            const distance = calculateDistance3D(particles[i], particles[j]);
+
+            if (
+              distance > minDistance &&
+              distance < maxDistance &&
+              connectionCounts[i] < maxConnectionsPerParticle &&
+              connectionCounts[j] < maxConnectionsPerParticle
+            ) {
+              // Create connection
+              const connection = new Connection(particles[i], particles[j]);
+              connections.push(connection);
+
+              // Store reference in both particles
+              particles[i].connections.push(connection);
+              particles[j].connections.push(connection);
+
+              // Increment connection counts
+              connectionCounts[i]++;
+              connectionCounts[j]++;
+            }
+          }
+        }
+      }
+
+      // Animation loop
+      function animate() {
+        requestAnimationFrame(animate);
+
+        // Clear canvas
+        ctx.fillStyle = "rgba(0, 0, 0, 1)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Update global pulse phase
+        pulsePhase += 0.02;
+
+        // Update rotations with easing
+        currentRotationX += (targetRotationX - currentRotationX) * 0.05;
+        currentRotationY += (targetRotationY - currentRotationY) * 0.05;
+
+        // Auto rotation if mouse is not moving
+        if (autoRotate) {
+          currentRotationY += 0.001;
+        }
+
+        // Update energy waves
+        for (let i = energyWaves.length - 1; i >= 0; i--) {
+          const wave = energyWaves[i];
+          wave.radius += wave.speed;
+          wave.strength *= 0.98;
+
+          // Remove waves that have expanded beyond their max radius or lost strength
+          if (wave.radius > wave.maxRadius || wave.strength < 0.05) {
+            energyWaves.splice(i, 1);
+          }
+        }
+
+        // Draw energy waves
+        energyWaves.forEach((wave) => {
+          ctx.beginPath();
+          ctx.strokeStyle = `rgba(255, 255, 255, ${wave.strength * 0.3})`;
+          ctx.lineWidth = 2;
+          ctx.arc(wave.x, wave.y, wave.radius, 0, Math.PI * 2);
+          ctx.stroke();
+        });
+
+        // Update particle positions
+        for (const particle of particles) {
+          particle.update();
+        }
+
+        // Update and draw all connections
+        for (const connection of connections) {
+          connection.update();
+          connection.draw();
+        }
+
+        // Draw all particles
+        for (const particle of particles) {
+          particle.draw();
+        }
+
+        // Randomly energize particles
+        if (Math.random() < 0.01) {
+          const randomParticle =
+            particles[Math.floor(Math.random() * particles.length)];
+          randomParticle.brightness = 0.8;
+          randomParticle.energy = 0.3;
+
+          // Propagate energy to connected particles
+          randomParticle.connections.forEach((conn) => {
+            const otherParticle =
+              conn.p1 === randomParticle ? conn.p2 : conn.p1;
+            otherParticle.energy = 0.2;
+            otherParticle.brightness = 0.6;
+          });
+        }
+      }
+
+      // Initialize everything
+      createParticles();
+      createConnections();
+      animate();
+    </script>
+  </body>
+</html>
